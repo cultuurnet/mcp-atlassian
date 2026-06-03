@@ -1238,15 +1238,15 @@ async def get_page_with_full_diff_history(
         Field(
             description=(
                 "Maximum number of consecutive version diffs to include, counted backwards "
-                "from the current version. For example, 5 returns diffs for "
+                "from the latest version. For example, 5 returns diffs for "
                 "v_N→v_(N-1), v_(N-1)→v_(N-2), …, v_(N-4)→v_(N-5). "
-                "Defaults to 10. Higher values make more API calls."
+                "Defaults to 20. Higher values make more API calls."
             ),
-            default=10,
+            default=20,
             ge=1,
             le=100,
         ),
-    ] = 10,
+    ] = 20,
     convert_to_markdown: Annotated[
         bool,
         Field(
@@ -1268,7 +1268,7 @@ async def get_page_with_full_diff_history(
     Args:
         ctx: The FastMCP context.
         page_id: Confluence page ID.
-        max_versions: How many version diffs to return (default 10).
+        max_versions: How many version diffs to return (default 20).
         convert_to_markdown: Convert content to markdown or keep raw HTML.
 
     Returns:
@@ -1288,21 +1288,17 @@ async def get_page_with_full_diff_history(
             ensure_ascii=False,
         )
 
-    current_version = current_page.version.number if current_page.version else 1
-
     version_history: list[dict] = []
-    if current_version > 1:
-        try:
-            raw_history = confluence_fetcher.get_full_diff_history(
-                page_id=page_id,
-                current_version=current_version,
-                max_versions=max_versions,
-            )
-            # Timestamps are already formatted by get_full_diff_history.
-            version_history = list(raw_history)
-        except Exception as e:
-            logger.error(f"Error building diff history for page {page_id}: {e}")
-            version_history = [{"error": f"Failed to retrieve version history: {e}"}]
+    try:
+        raw_history = confluence_fetcher.get_full_diff_history(
+            page_id=page_id,
+            max_versions=max_versions,
+        )
+        # Timestamps are already formatted by get_full_diff_history.
+        version_history = list(raw_history)
+    except Exception as e:
+        logger.error(f"Error building diff history for page {page_id}: {e}")
+        version_history = [{"error": f"Failed to retrieve version history: {e}"}]
 
     result = {
         "page": {"metadata": current_page.to_simplified_dict()},

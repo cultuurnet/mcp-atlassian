@@ -1205,24 +1205,25 @@ class PagesMixin(ConfluenceClient):
     def get_full_diff_history(
         self,
         page_id: str,
-        current_version: int,
-        max_versions: int = 10,
+        max_versions: int = 20,
     ) -> list[dict[str, Any]]:
-        """Return consecutive version diffs going backwards from current_version.
+        """Return consecutive version diffs going backwards from the latest version.
 
         Each entry covers one version step (v → v-1) and includes the diff
         string plus datetime/author metadata for both sides.
 
         Args:
             page_id: Page ID.
-            current_version: Version to start from (typically the latest).
-            max_versions: How many version diffs to include (default 10).
+            max_versions: How many version diffs to include (default 20).
 
         Returns:
             List of dicts ordered newest-first, each with: from_version,
             to_version, from_datetime, to_datetime, optionally from_author /
             to_author, and diff.
         """
+        page = self.confluence.get_page_by_id(page_id=page_id, expand="version")
+        current_version: int = page.get("version", {}).get("number", 1)
+
         oldest = max(1, current_version - max_versions)
 
         # Fetch all needed versions in one pass to avoid double-fetching.
