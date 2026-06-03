@@ -1218,6 +1218,100 @@ async def get_page_diff(
 
 
 @confluence_mcp.tool(
+    tags={"confluence", "read", "toolset:confluence_pages"},
+    annotations={"title": "Get Page With Full Diff History", "readOnlyHint": True},
+)
+async def get_page_with_full_diff_history(
+    ctx: Context,
+    page_id: Annotated[
+        str,
+        Field(
+            description=(
+                "Confluence page ID (numeric ID, can be found in the page URL). "
+                "For example, in the URL 'https://example.atlassian.net/wiki/spaces/TEAM/pages/123456789/Page+Title', "
+                "the page ID is '123456789'."
+            )
+        ),
+    ],
+    max_versions: Annotated[
+        int,
+        Field(
+            description=(
+                "Maximum number of consecutive version diffs to include, counted backwards "
+                "from the current version. For example, 5 returns diffs for "
+                "v_N→v_(N-1), v_(N-1)→v_(N-2), …, v_(N-4)→v_(N-5). "
+                "Defaults to 10. Higher values make more API calls."
+            ),
+            default=10,
+            ge=1,
+            le=100,
+        ),
+    ] = 10,
+    convert_to_markdown: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether to convert page content to markdown (true) or keep raw HTML (false). "
+                "Applies to both the current page body and the diff content."
+            ),
+            default=True,
+        ),
+    ] = True,
+) -> str:
+    """Get a Confluence page together with its full version diff history.
+
+    Returns the current page content (identical to confluence_get_page) plus
+    a ``version_history`` list of consecutive version diffs ordered newest-first.
+    Each history entry contains the unified diff between two adjacent versions
+    and datetime / author metadata for both sides.
+
+    Args:
+        ctx: The FastMCP context.
+        page_id: Confluence page ID.
+        max_versions: How many version diffs to return (default 10).
+        convert_to_markdown: Convert content to markdown or keep raw HTML.
+
+    Returns:
+        JSON string with ``page`` (current page metadata + content) and
+        ``version_history`` (list of diffs with timestamps).
+    """
+    confluence_fetcher = await get_confluence_fetcher(ctx)
+    try:
+        current_page = confluence_fetcher.get_page_content(
+            page_id, convert_to_markdown=convert_to_markdown
+        )
+    except Exception as e:
+        logger.error(f"Error fetching page {page_id}: {e}")
+        return json.dumps(
+            {"error": f"Failed to retrieve page '{page_id}': {e}"},
+            indent=2,
+            ensure_ascii=False,
+        )
+
+    current_version = current_page.version.number if current_page.version else 1
+
+    version_history: list[dict] = []
+    if current_version > 1:
+        try:
+            raw_history = confluence_fetcher.get_full_diff_history(
+                page_id=page_id,
+                current_version=current_version,
+                max_versions=max_versions,
+            )
+            # Timestamps are already formatted by get_full_diff_history.
+            version_history = list(raw_history)
+        except Exception as e:
+            logger.error(f"Error building diff history for page {page_id}: {e}")
+            version_history = [{"error": f"Failed to retrieve version history: {e}"}]
+
+    result = {
+        "page": {"metadata": current_page.to_simplified_dict()},
+        "version_history": version_history,
+    }
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+@confluence_mcp.tool(
     tags={"confluence", "read", "analytics", "toolset:confluence_analytics"},
     annotations={"title": "Get Page Views", "readOnlyHint": True},
 )

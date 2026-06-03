@@ -1200,3 +1200,62 @@ class PagesMixin(ConfluenceClient):
             "to_version": to_version,
             "diff": diff_string,
         }
+
+    @handle_auth_errors("Confluence API")
+    def get_full_diff_history(
+        self,
+        page_id: str,
+        current_version: int,
+        max_versions: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Return consecutive version diffs going backwards from current_version.
+
+        Each entry covers one version step (v → v-1) and includes the diff
+        string plus datetime/author metadata for both sides.
+
+        Args:
+            page_id: Page ID.
+            current_version: Version to start from (typically the latest).
+            max_versions: How many version diffs to include (default 10).
+
+        Returns:
+            List of dicts ordered newest-first, each with: from_version,
+            to_version, from_datetime, to_datetime, optionally from_author /
+            to_author, and diff.
+        """
+        oldest = max(1, current_version - max_versions)
+
+        # Fetch all needed versions in one pass to avoid double-fetching.
+        # We need versions oldest..current_version inclusive.
+        version_pages: dict[int, ConfluencePage] = {}
+        for v in range(oldest, current_version + 1):
+            version_pages[v] = self.get_page_history(page_id=page_id, version=v)
+
+        history: list[dict[str, Any]] = []
+        for to_v in range(current_version, oldest, -1):
+            from_v = to_v - 1
+            from_page = version_pages[from_v]
+            to_page = version_pages[to_v]
+
+            diff_lines = difflib.unified_diff(
+                (from_page.content or "").splitlines(),
+                (to_page.content or "").splitlines(),
+                fromfile=f"v{from_v}",
+                tofile=f"v{to_v}",
+                lineterm="",
+            )
+
+            entry: dict[str, Any] = {
+                "from_version": from_v,
+                "to_version": to_v,
+                "from_datetime": ConfluencePage.format_timestamp(from_page.updated),
+                "to_datetime": ConfluencePage.format_timestamp(to_page.updated),
+                "diff": "\n".join(diff_lines),
+            }
+            if from_page.version and from_page.version.by:
+                entry["from_author"] = from_page.version.by.display_name
+            if to_page.version and to_page.version.by:
+                entry["to_author"] = to_page.version.by.display_name
+            history.append(entry)
+
+        return history
